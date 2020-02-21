@@ -1,0 +1,154 @@
+---
+title: "Project1"
+author: "Devin Teran"
+date: "2/18/2020"
+output:
+  html_document:
+    theme: cerulean
+    highlight: pygments
+  
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(stringr)
+library(readr)
+library(dplyr)
+library(kableExtra)
+```
+
+## Overview
+The objective of this project is to import and clean a set of data about chess tournament player performance.  The output will be a csv which contains the following information:
+```{r example_output_table,echo=FALSE}
+outputExample <- data.frame("Players Name" = "Gary Hua","Players State" = "ON", "Total Number of Points" = 6.0, "Players Pre_Rating" = 1794, "Average Pre Chess Rating of Opponents" = 1605)
+kable(outputExample) %>%
+  kable_styling(bootstrap_options = c("striped","hover"),full_width=F)
+```
+
+
+
+## Retrieve Data
+The data can be found in GitHub as a text file.  This will be imported into R using the read_table() function.
+```{r get_txt_data}
+file_path <- "https://raw.githubusercontent.com/devinteran/DATA607---Project-1/master/tournamentinfo.txt"
+chess_raw <- read_table(file_path)
+
+```
+
+## Clean Data
+Below we are going to clean the Chess Tournament data that has been imported from a text file. There are enitre dashed lines separating lines of data and a single line of data spans two rows.  We will need to merge the information from these two rows into a single line.  I will also rename and remove columns that won't be needed.
+```{r view_head_data}
+chess <- unlist(chess_raw)
+head(chess)
+```
+
+```{r clean_data}
+#Remove all lines that are only dashes
+chess <- str_replace_all(chess,"-","")
+chess <- chess[str_detect(chess,"[^(-)\\1+$]",2) == FALSE]
+
+#Combine the lines that have been separated
+line_numbers <- c(1:length(chess))
+odd_lines_numbers <- line_numbers[line_numbers%%2 == 1]
+even_line_numbers <- line_numbers[line_numbers%%2 == 0]
+chess_data <- str_c(chess[odd_lines_numbers],chess[even_line_numbers])
+
+#Additional cleaning & renaming columns
+chess_data <- str_replace_all(chess_data,"[\\|]",",")
+chess_data <- str_split(chess_data,",")
+chess_df <- as.data.frame(matrix(unlist(chess_data), nrow=65, byrow=TRUE))
+
+#Subset & rename only columns that are needed
+chess_df_subset <- chess_df[,c(1:13)]
+chess_df_subset <- chess_df_subset[-1,]
+colnames(chess_df_subset) <- c("Player_ID","PlayerName","Total Points","Opponent1","Opponent2","Opponent3","Opponent4","Opponent5","Opponent6","Opponent7","State","USCF ID / Rtg (Pre>Post)","Points_Total")
+
+#Clean up data types
+chess_df_subset$Player_ID <- as.numeric(as.character(chess_df_subset$Player_ID))
+
+```
+
+## Player's Pre & Post Tournament Ratings
+From the raw data, each player can been seen to have a pre tournament rating as well as a post tournament ratings.  The first number that follows the "R:" is the Pre-Tournamnet Player Rating.
+```{r player_pre_rating_example_from_raw,echo=FALSE}
+example_Untidy_data <- head(chess_df_subset[,c('Player_ID','USCF ID / Rtg (Pre>Post)')])
+kable(example_Untidy_data) %>%
+  kable_styling(bootstrap_options = c("striped","hover"),full_width=F)
+```
+The information is all contained in a single string and must be parsed out using regular expressions.  
+```{r player_id_pre_post_scores}
+chess_avg_player <- chess_df_subset[,c('Player_ID','USCF ID / Rtg (Pre>Post)')]
+chess_avg_player <- chess_avg_player %>% separate(`USCF ID / Rtg (Pre>Post)`,c("USCF_ID","Rtg(Pre>Post)"),"/")
+chess_avg_player <- chess_avg_player %>% separate('Rtg(Pre>Post)',c("Rating_Pre","Rating_Post"),">")
+
+#Clean up player pre ratings
+chess_avg_player$Rating_Pre <- str_replace_all(chess_avg_player$Rating_Pre,"[\\s+?R:\\s+]","")
+chess_avg_player$Rating_Pre <- str_replace_all(chess_avg_player$Rating_Pre, "(P\\d+)$","")
+chess_avg_player$Rating_Pre <- as.numeric(as.character(chess_avg_player$Rating_Pre))
+
+#Clean up player post ratings
+chess_avg_player$Rating_Post <- str_replace_all(chess_avg_player$Rating_Post,"[\\s+]","")
+chess_avg_player$Rating_Post <- str_replace_all(chess_avg_player$Rating_Post,"(P\\d+)$","")
+chess_avg_player$Rating_Post <- as.numeric(as.character(chess_avg_player$Rating_Post))
+```
+## Clean Opponent Match Information
+We must remove excess information that doesn't pertain to our analysis.  We are looking to tidy data so that we can determine for each player, which opponent did they go up against in each match?  We will pivot the data into a long format, so joining with player data later will be easier.
+``` {r separate_individual_matches}
+#Subset data to get opponent player IDs
+chess_opponents <- chess_df_subset[,c(1,4:11)]
+
+#Strip out W,L,D,B characters since we won't need them 
+opponent_cols <- c("Opponent1","Opponent2","Opponent3","Opponent4","Opponent5","Opponent6","Opponent7")
+chess_opponents$Opponent1 <- str_replace_all(chess_opponents$Opponent1,"[\\s+?(W|L|D|B|H|U|X)\\s+?]","")
+chess_opponents$Opponent2 <- str_replace_all(chess_opponents$Opponent2,"[\\s+?(W|L|D|B|H|U|X))\\s+?]","")
+chess_opponents$Opponent3 <- str_replace_all(chess_opponents$Opponent3,"[\\s+?(W|L|D|B|H|U|X))\\s+?]","")
+chess_opponents$Opponent4 <- str_replace_all(chess_opponents$Opponent4,"[\\s+?(W|L|D|B|H|U|X))\\s+?]","")
+chess_opponents$Opponent5 <- str_replace_all(chess_opponents$Opponent5,"[\\s+?(W|L|D|B|H|U|X))\\s+?]","")
+chess_opponents$Opponent6 <- str_replace_all(chess_opponents$Opponent6,"[\\s+?(W|L|D|B|H|U|X))\\s+?]","")
+chess_opponents$Opponent7 <- str_replace_all(chess_opponents$Opponent7,"[\\s+?(W|L|D|B|H|U|X))\\s+?]","")
+
+chess_opponents_long <- chess_opponents %>% pivot_longer(cols = starts_with("Opponent"),names_to="Opponent_no",values_to="Opponent_ID")
+chess_opponents_long$Opponent_ID <- as.numeric(as.character(chess_opponents_long$Opponent_ID))
+
+kable(head(chess_opponents_long)) %>%
+  kable_styling(bootstrap_options = c("striped","hover"),full_width=F)
+```
+
+## Average Opponent Ratings
+We then grouped each player's opponent ratings and average the opponent scores.   
+```{r avg_opp_ratings}
+combined <- inner_join(chess_opponents_long,chess_avg_player,by= c("Opponent_ID" = "Player_ID"))
+ratings <- combined %>% group_by(Player_ID) %>% summarise(Avg_Opponent_Pre_Rating = mean(Rating_Pre))
+ratings$Player_ID <- as.numeric(as.character(ratings$Player_ID))
+
+kable(head(ratings)) %>%
+  kable_styling(bootstrap_options = c("striped","hover"),full_width=F)
+```
+
+## Combining Everything Together
+
+```{r combine_everything}
+individual_player <- left_join(chess_df_subset[,c(1,2,3,11)],chess_avg_player[,c(1,3)],by = c("Player_ID" = "Player_ID"))
+final <- left_join(individual_player,ratings,by = c("Player_ID" = "Player_ID"))
+final <- final[,c(2,4,3,5,6)]
+```
+Now that we have the individual player information:
+```{r individual_player_info,echo=FALSE}
+kable(head(individual_player)) %>%
+  kable_styling(bootstrap_options = c("striped","hover"),full_width=F)
+```
+Along with the average opponent pre tournament scores:
+```{r avg_opponent_ratings,echo=FALSE}
+kable(head(ratings)) %>%
+  kable_styling(bootstrap_options = c("striped","hover"),full_width=F)
+```
+We can combine them together, joining using Player_ID, to get our final results & export the data into a csv "Chess_Tournament_Results.csv".
+```{r final,echo=FALSE}
+kable(head(final)) %>%
+  kable_styling(bootstrap_options = c("striped","hover"),full_width=F)
+```
+```{r export_data_csv}
+write.csv(final,'Chess_Tournament_Results.csv')
+```
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+chess[
